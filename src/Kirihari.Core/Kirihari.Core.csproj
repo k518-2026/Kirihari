@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Lite と Pro が共有する部品（編集内容・ffmpeg の組み立て・タイムライン・再生） -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Kirihari</RootNamespace>
+    <AssemblyName>Kirihari.Core</AssemblyName>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF では System.IO が暗黙の using から外れるため足す -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+</Project>

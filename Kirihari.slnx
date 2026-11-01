@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/Kirihari.Core/Kirihari.Core.csproj" />
+  <Project Path="src/Kirihari.Lite/Kirihari.Lite.csproj" />
+  <Project Path="src/Kirihari.Pro/Kirihari.Pro.csproj" />
+  <Project Path="tests/Kirihari.Tests/Kirihari.Tests.csproj" />
+</Solution>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Kirihari.Tests</RootNamespace>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF では System.IO が暗黙の using から外れるため足す -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kirihari.Core\Kirihari.Core.csproj" />
+    <!-- 画面の描画確認（shot）で使う -->
+    <ProjectReference Include="..\..\src\Kirihari.Lite\Kirihari.Lite.csproj" />
+    <ProjectReference Include="..\..\src\Kirihari.Pro\Kirihari.Pro.csproj" />
+  </ItemGroup>
+
+</Project>

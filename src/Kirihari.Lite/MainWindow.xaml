@@ -1,0 +1,207 @@
+<Window x:Class="Kirihari.Lite.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:Kirihari.Controls;assembly=Kirihari.Core"
+        Title="Kirihari Lite　動画をつないで、切って、MP4にする"
+        Width="1100" Height="760" MinWidth="900" MinHeight="640"
+        Icon="pack://application:,,,/Kirihari_Lite;component/app.ico"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 上：手順と動画の追加 -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush2}"
+                BorderThickness="0,0,0,1" Padding="14,10">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="↶ 元に戻す" Command="{Binding UndoCommand}" Margin="0,0,6,0" ToolTip="Ctrl+Z" />
+                    <Button Content="↷ やり直す" Command="{Binding RedoCommand}" ToolTip="Ctrl+Y" />
+                </StackPanel>
+                <Button DockPanel.Dock="Left" Style="{StaticResource AccentButton}" Command="{Binding AddFilesCommand}"
+                        Content="＋ 動画を入れる" FontSize="15" Margin="0,0,18,0" ToolTip="Ctrl+O　（ウィンドウにドラッグ＆ドロップでもOK）" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="① 動画を入れる" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                    <TextBlock Text="　→　" Foreground="{StaticResource TextDimBrush}" />
+                    <TextBlock Text="② いらない所を切る" FontWeight="SemiBold" />
+                    <TextBlock Text="　→　" Foreground="{StaticResource TextDimBrush}" />
+                    <TextBlock Text="③ MP4で書き出す" FontWeight="SemiBold" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ffmpeg が見つからないとき -->
+        <Border Grid.Row="1" Background="#FF5A3B1E" Padding="14,8"
+                Visibility="{Binding FfmpegMissing, Converter={StaticResource BoolToVis}}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="ffmpeg.exe を選ぶ…" Command="{Binding ChooseFfmpegCommand}" />
+                <TextBlock TextWrapping="Wrap" Margin="0,0,12,0" VerticalAlignment="Center"
+                           Text="動画を処理する部品 ffmpeg が見つかりません。ffmpeg.exe と ffprobe.exe をこのアプリと同じフォルダーに置くか、右のボタンで場所を教えてください。（入手方法は README を見てください）" />
+            </DockPanel>
+        </Border>
+
+        <!-- 中：一覧とプレビュー -->
+        <Grid Grid.Row="2" Margin="12,12,12,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左：つなぐ順番 -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="つなぐ順番" Style="{StaticResource SectionText}" Margin="0,0,0,6" />
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource DimText}" Margin="0,0,0,8"
+                           Text="上から順につながります。切ると、ここに区間が増えます。" />
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                    <UniformGrid Columns="2">
+                        <Button Content="▲ 前へ" Command="{Binding MoveUpCommand}" Margin="0,0,3,6" />
+                        <Button Content="▼ 後ろへ" Command="{Binding MoveDownCommand}" Margin="3,0,0,6" />
+                    </UniformGrid>
+                    <Button Content="✕ この区間を消す" Command="{Binding DeleteSegmentCommand}"
+                            Style="{StaticResource DangerButton}" ToolTip="Delete キー" Margin="0,0,0,6" />
+                    <Button Content="全部消して最初から" Command="{Binding ClearAllCommand}" />
+                </StackPanel>
+                <ListBox ItemsSource="{Binding Project.Segments}" SelectedItem="{Binding SelectedSegment, Mode=TwoWay}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Background="{Binding ColorBrush}" />
+                                <StackPanel Grid.Column="1" Margin="9,6,6,6">
+                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding RangeText}" Style="{StaticResource DimText}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <!-- 右：プレビューと操作 -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="Black" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" MinHeight="200">
+                    <Grid>
+                        <MediaElement x:Name="Media" Stretch="Uniform" />
+                        <Image x:Name="Frame" Stretch="Uniform" Visibility="Collapsed" />
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="ここに動画ファイルをドラッグ＆ドロップ" FontSize="22" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="（何本でも。ファイル名の順につなぎます）" Style="{StaticResource DimText}"
+                                       HorizontalAlignment="Center" Margin="0,8,0,16" FontSize="13" />
+                            <Button Style="{StaticResource AccentButton}" Command="{Binding AddFilesCommand}"
+                                    Content="＋ 動画を選ぶ" HorizontalAlignment="Center" FontSize="15" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- 再生ボタンと時刻 -->
+                <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="⏮" Command="{Binding GoStartCommand}" ToolTip="先頭へ（Home）" />
+                        <Button Content="◀ 1コマ" Command="{Binding StepCommand}" CommandParameter="-1" Margin="4,0,0,0" ToolTip="← キー" />
+                        <Button Content="{Binding PlayText}" Command="{Binding TogglePlayCommand}" Style="{StaticResource AccentButton}"
+                                Margin="4,0,0,0" MinWidth="110" ToolTip="Space キー" />
+                        <Button Content="1コマ ▶" Command="{Binding StepCommand}" CommandParameter="1" Margin="4,0,0,0" ToolTip="→ キー" />
+                        <Button Content="⏭" Command="{Binding GoEndCommand}" Margin="4,0,0,0" ToolTip="最後へ（End）" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- 時刻・タイムライン -->
+                <DockPanel Grid.Row="2" Margin="0,8,0,4" Height="30">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <CheckBox IsChecked="{Binding Muted}" Margin="0,0,12,0">
+                            <TextBlock Text="音を消す" />
+                        </CheckBox>
+                        <Button Content="全体を見る" Command="{Binding ZoomAllCommand}" Padding="8,2"
+                                ToolTip="タイムラインを全体の表示に戻す（Ctrl+ホイールで拡大）" />
+                    </StackPanel>
+                    <TextBlock VerticalAlignment="Center" FontFamily="Consolas" FontSize="18">
+                        <Run Text="{Binding PositionText, Mode=OneWay}" />
+                        <Run Text=" / " Foreground="{StaticResource TextDimBrush}" />
+                        <Run Text="{Binding TotalText, Mode=OneWay}" Foreground="{StaticResource TextDimBrush}" />
+                    </TextBlock>
+                </DockPanel>
+                <c:TimelineControl x:Name="Timeline" Grid.Row="3" Height="74"
+                                   Project="{Binding Project}" Position="{Binding Position, Mode=TwoWay}"
+                                   MarkIn="{Binding MarkIn, Mode=OneWay}" MarkOut="{Binding MarkOut, Mode=OneWay}" />
+
+                <!-- 切る操作 -->
+                <StackPanel Grid.Row="4" Margin="0,10,0,0">
+                    <WrapPanel>
+                        <Button Content="✂ ここで分ける" Command="{Binding SplitCommand}" Margin="0,0,6,6" ToolTip="S キー" />
+                        <Button Content="ここより前を全部消す" Command="{Binding TrimBeforeCommand}" Margin="0,0,6,6" />
+                        <Button Content="ここより後ろを全部消す" Command="{Binding TrimAfterCommand}" Margin="0,0,6,6" />
+                    </WrapPanel>
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="5" Padding="10,8">
+                        <DockPanel>
+                            <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center">
+                                <Button Content="消したい所の はじめ" Command="{Binding SetInCommand}" Margin="0,0,6,0" ToolTip="I キー" />
+                                <Button Content="おわり" Command="{Binding SetOutCommand}" Margin="0,0,6,0" ToolTip="O キー" />
+                                <Button Content="✕ 範囲を消す" Command="{Binding RemoveRangeCommand}" Style="{StaticResource DangerButton}"
+                                        Margin="0,0,6,0" ToolTip="X キー" />
+                                <Button Content="範囲だけ残す" Command="{Binding KeepRangeCommand}" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding RangeText}" Style="{StaticResource DimText}" VerticalAlignment="Center"
+                                       Margin="0,0,12,0" />
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <!-- 下：書き出し -->
+        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush2}"
+                BorderThickness="0,1,0,0" Padding="14,10">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" Command="{Binding ExportCommand}"
+                            Content="③ MP4で書き出す" FontSize="15" Margin="12,0,0,0" ToolTip="Ctrl+E"
+                            Visibility="{Binding ExportIdle, Converter={StaticResource BoolToVis}}" />
+                    <Button DockPanel.Dock="Right" Command="{Binding CancelExportCommand}" Content="中止" Margin="12,0,0,0"
+                            Style="{StaticResource DangerButton}"
+                            Visibility="{Binding ExportBusy, Converter={StaticResource BoolToVis}}" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding CompatText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding EstimateText}" Style="{StaticResource DimText}" />
+                    </StackPanel>
+                </DockPanel>
+
+                <StackPanel Margin="0,8,0,0" Visibility="{Binding ExportBusy, Converter={StaticResource BoolToVis}}">
+                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding ExportPercent, Mode=OneWay}" />
+                    <TextBlock Text="{Binding ExportText}" Margin="0,4,0,0" />
+                </StackPanel>
+
+                <Border Margin="0,8,0,0" Padding="10,8" CornerRadius="5" Background="#FF1F3A33"
+                        Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="フォルダーを開く" Command="{Binding OpenFolderCommand}" Margin="0,0,6,0" />
+                            <Button Content="▶ 見てみる" Command="{Binding PlayResultCommand}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding ResultText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
+
+                <TextBlock Text="{Binding Status}" Style="{StaticResource DimText}" Margin="0,6,0,0" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
