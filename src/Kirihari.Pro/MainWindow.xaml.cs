@@ -18,5 +18,9 @@ public partial class MainWindow : Window
         AudioBox.ItemsSource = ExportOptions.AudioLabels;
         EncoderBox.ItemsSource = ExportOptions.EncoderLabels;
         PresetBox.ItemsSource = ExportOptions.PresetLabels;
+        // 旧 SwiftCut から移した設定（2026-11-02）
+        FormatBox.ItemsSource = ExportOptions.FormatLabels;
+        SpeedBox.ItemsSource = ExportOptions.SpeedLabels;
+        VolumeBox.ItemsSource = ExportOptions.VolumeLabels;
     }
 }

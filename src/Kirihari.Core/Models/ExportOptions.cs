@@ -3,6 +3,9 @@ using Kirihari.Common;
 
 namespace Kirihari.Models;
 
+/// <summary>出力の形式。</summary>
+public enum OutputFormat { Mp4H264, Mp4H265, Mkv, Mov, Webm, Gif, Mp3, Wav }
+
 /// <summary>
 /// 再エンコードで書き出すときの細かい設定。Lite は既定のまま使い、Pro は画面から変える。
 /// </summary>
@@ -23,6 +26,73 @@ public sealed class ExportOptions : ObservableObject
 
     public static readonly string[] Presets = { "ultrafast", "veryfast", "faster", "medium", "slow" };
     public static readonly string[] PresetLabels = { "最速（ファイル大）", "速い（標準）", "やや速い", "ふつう", "遅い（ファイル小）" };
+
+    // ---- 旧 SwiftCut から移した設定（2026-11-02）。既定値は従来の Kirihari と同じ（MP4・等速・音量そのまま・1本にまとめる） ----
+
+    public static readonly OutputFormat[] Formats =
+    {
+        OutputFormat.Mp4H264, OutputFormat.Mp4H265, OutputFormat.Mkv, OutputFormat.Mov,
+        OutputFormat.Webm, OutputFormat.Gif, OutputFormat.Mp3, OutputFormat.Wav,
+    };
+    public static readonly string[] FormatLabels =
+    {
+        "MP4（H.264・標準）", "MP4（H.265・小さめ）", "MKV（H.264）", "MOV（H.264）",
+        "WebM（VP9 + Opus）", "GIF アニメ（最大 480p・15fps）", "MP3（音声だけ）", "WAV（音声だけ）",
+    };
+
+    public static readonly double[] Speeds = { 1.0, 0.5, 0.75, 1.25, 1.5, 2.0, 4.0 };
+    public static readonly string[] SpeedLabels = { "等速（そのまま）", "0.5 倍（ゆっくり）", "0.75 倍", "1.25 倍", "1.5 倍", "2 倍", "4 倍" };
+
+    /// <summary>音量の倍率。0 は音声を入れない。</summary>
+    public static readonly double[] Volumes = { 1.0, 0.5, 0.75, 1.5, 2.0, 0.0 };
+    public static readonly string[] VolumeLabels = { "そのまま", "50%", "75%", "150%", "200%", "音声を入れない" };
+
+    private int _formatIndex, _speedIndex, _volumeIndex;
+    private bool _splitFiles;
+
+    public int FormatIndex { get => _formatIndex; set { if (Set(ref _formatIndex, value)) { Raise(nameof(RequiresEncode)); Raise(nameof(Format)); Raise(nameof(Extension)); } } }
+    public int SpeedIndex { get => _speedIndex; set { if (Set(ref _speedIndex, value)) Raise(nameof(RequiresEncode)); } }
+    public int VolumeIndex { get => _volumeIndex; set { if (Set(ref _volumeIndex, value)) Raise(nameof(RequiresEncode)); } }
+
+    /// <summary>区間ごとに別のファイルとして書き出す（旧 SwiftCut の「分割書き出し」）。</summary>
+    public bool SplitFiles { get => _splitFiles; set => Set(ref _splitFiles, value); }
+
+    public OutputFormat Format => Formats[Math.Clamp(FormatIndex, 0, Formats.Length - 1)];
+    public double Speed => Speeds[Math.Clamp(SpeedIndex, 0, Speeds.Length - 1)];
+    public double Volume => Volumes[Math.Clamp(VolumeIndex, 0, Volumes.Length - 1)];
+    public bool Mute => Volume <= 0;
+    public bool IsAudioOnly => Format is OutputFormat.Mp3 or OutputFormat.Wav;
+
+    public string Extension => Format switch
+    {
+        OutputFormat.Mkv => ".mkv",
+        OutputFormat.Mov => ".mov",
+        OutputFormat.Webm => ".webm",
+        OutputFormat.Gif => ".gif",
+        OutputFormat.Mp3 => ".mp3",
+        OutputFormat.Wav => ".wav",
+        _ => ".mp4",
+    };
+
+    public string SaveFilter => Format switch
+    {
+        OutputFormat.Mkv => "MKV 動画 (*.mkv)|*.mkv",
+        OutputFormat.Mov => "MOV 動画 (*.mov)|*.mov",
+        OutputFormat.Webm => "WebM 動画 (*.webm)|*.webm",
+        OutputFormat.Gif => "GIF アニメ (*.gif)|*.gif",
+        OutputFormat.Mp3 => "MP3 音声 (*.mp3)|*.mp3",
+        OutputFormat.Wav => "WAV 音声 (*.wav)|*.wav",
+        _ => "MP4 動画 (*.mp4)|*.mp4",
+    };
+
+    /// <summary>再エンコードなしでは書き出せない理由。書き出せるなら null。</summary>
+    public string EncodeReason =>
+        HeightIndex != 0 || FpsIndex != 0 || DeinterlaceIndex == 1 ? "画面サイズ・フレームレート・インターレースを変える設定のため"
+        : Format is OutputFormat.Mp4H265 ? "H.265 に作り直す設定のため"
+        : Format is OutputFormat.Webm or OutputFormat.Gif or OutputFormat.Mp3 or OutputFormat.Wav ? $"出力形式（{FormatLabels[FormatIndex]}）に作り直す必要があるため"
+        : Math.Abs(Speed - 1.0) > 1e-9 ? "速さを変える設定のため"
+        : !Mute && Math.Abs(Volume - 1.0) > 1e-9 ? "音量を変える設定のため"
+        : null;
 
     private int _quality = 18;
     private int _heightIndex, _fpsIndex, _deintIndex, _audioIndex = 1, _encoderIndex, _presetIndex = 1;
@@ -52,8 +122,8 @@ public sealed class ExportOptions : ObservableObject
     /// <summary>"auto" / true / false の3択。</summary>
     public bool? Deinterlace => DeinterlaceIndex switch { 1 => true, 2 => false, _ => null };
 
-    /// <summary>画面サイズ・フレームレート・インターレース解除を変える指定があると、再エンコードなしでは書き出せない。</summary>
-    public bool RequiresEncode => HeightIndex != 0 || FpsIndex != 0 || DeinterlaceIndex == 1;
+    /// <summary>画面サイズ・フレームレート・インターレース解除・出力形式・速さ・音量の指定によっては、再エンコードなしでは書き出せない。</summary>
+    public bool RequiresEncode => EncodeReason != null;
 
     public static double ParseRate(string fps)
     {

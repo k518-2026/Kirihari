@@ -193,6 +193,18 @@
                     </Grid>
                     <Button Content="この範囲にする" Command="{Binding ApplySegmentRangeCommand}" Margin="0,6,0,0" HorizontalAlignment="Left" />
 
+                    <TextBlock Text="出力の形式" Style="{StaticResource PanelTitle}" />
+                    <ComboBox x:Name="FormatBox" SelectedIndex="{Binding Options.FormatIndex}" />
+                    <TextBlock Text="速さ" Style="{StaticResource FieldLabel}" />
+                    <ComboBox x:Name="SpeedBox" SelectedIndex="{Binding Options.SpeedIndex}" />
+                    <TextBlock Text="音量" Style="{StaticResource FieldLabel}" />
+                    <ComboBox x:Name="VolumeBox" SelectedIndex="{Binding Options.VolumeIndex}" />
+                    <CheckBox IsChecked="{Binding Options.SplitFiles}" Margin="0,8,0,0">
+                        <TextBlock Text="区間ごとに別のファイルにする（_001・_002…）" TextWrapping="Wrap" />
+                    </CheckBox>
+                    <TextBlock Text="MKV・MOV は再エンコードなしでも書き出せます。H.265・WebM・GIF・MP3・WAV と、速さ・音量を変えるときは、自動で再エンコードになります。"
+                               Style="{StaticResource DimText}" Margin="0,4,0,0" />
+
                     <TextBlock Text="書き出しの方法" Style="{StaticResource PanelTitle}" />
                     <RadioButton IsChecked="{Binding ModeCopy}"><TextBlock Text="再エンコードなし（速い・無劣化）" /></RadioButton>
                     <RadioButton IsChecked="{Binding ModeEncode}"><TextBlock Text="再エンコードする（コマ単位で正確）" /></RadioButton>
@@ -237,7 +249,7 @@
             <StackPanel>
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" Command="{Binding ExportCommand}"
-                            Content="MP4で書き出す…" FontSize="15" Margin="12,0,0,0" ToolTip="Ctrl+E"
+                            Content="{Binding ExportButtonText}" FontSize="15" Margin="12,0,0,0" ToolTip="Ctrl+E"
                             Visibility="{Binding ExportIdle, Converter={StaticResource BoolToVis}}" />
                     <Button DockPanel.Dock="Right" Command="{Binding CancelExportCommand}" Content="中止" Margin="12,0,0,0"
                             Style="{StaticResource DangerButton}"

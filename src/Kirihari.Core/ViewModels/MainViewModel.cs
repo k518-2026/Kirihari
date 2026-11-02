@@ -253,6 +253,10 @@ public sealed class MainViewModel : ObservableObject
         set { if (value && Set(ref _preferCopy, false)) { Raise(nameof(ModeCopy)); RefreshExportInfo(); } }
     }
     public bool CanCopy => _compatReason == null && Project.Count > 0;
+
+    /// <summary>書き出しボタンの文字（Pro は形式を選べるので、それに合わせる）。</summary>
+    public string ExportButtonText => Options.Extension.TrimStart('.').ToUpperInvariant() + "で書き出す…"
+                                      + (Options.SplitFiles ? "（区間ごと）" : "");
     public string CompatText { get; private set; } = "";
     public string EstimateText { get; private set; } = "";
     public bool GpuAvailable => _gpu != null;
@@ -521,9 +525,9 @@ public sealed class MainViewModel : ObservableObject
     {
         var segs = Project.Segments.ToList();
         _compatReason = segs.Count == 0 ? "動画がありません"
-            : Options.RequiresEncode ? "画面サイズ・フレームレート・インターレースを変える設定のため"
-            : ExportPlanner.CheckCopy(segs);
+            : Options.EncodeReason ?? ExportPlanner.CheckCopy(segs);
         Raise(nameof(CanCopy));
+        Raise(nameof(ExportButtonText));
 
         if (segs.Count == 0)
         {
@@ -563,20 +567,33 @@ public sealed class MainViewModel : ObservableObject
         var segs = Project.Segments.ToList();
         var first = segs[0].Source;
 
+        string ext = Options.Extension;
+        bool split = Options.SplitFiles && segs.Count > 1;
         var dlg = new SaveFileDialog
         {
-            Title = "書き出す場所と名前",
-            Filter = "MP4 動画 (*.mp4)|*.mp4",
-            DefaultExt = ".mp4",
+            Title = split ? "書き出す場所と名前（区間ごとに _001・_002… を付けます）" : "書き出す場所と名前",
+            Filter = Options.SaveFilter,
+            DefaultExt = ext,
             AddExtension = true,
-            OverwritePrompt = true,
+            OverwritePrompt = !split,
             InitialDirectory = Path.GetDirectoryName(first.Path),
-            FileName = Path.GetFileNameWithoutExtension(first.FileName) + "_編集.mp4",
+            FileName = Path.GetFileNameWithoutExtension(first.FileName) + "_編集" + ext,
         };
         if (dlg.ShowDialog() != true) return;
         string outPath = dlg.FileName;
 
-        if (segs.Any(s => string.Equals(Path.GetFullPath(s.Source.Path), Path.GetFullPath(outPath), StringComparison.OrdinalIgnoreCase)))
+        // 区間ごとに書き出すときの名前（既にあれば (2) などを付けて、上書きしない）
+        var targets = new List<(List<Segment> segs, string path)>();
+        if (split)
+        {
+            string dir = Path.GetDirectoryName(outPath);
+            string stem = Path.GetFileNameWithoutExtension(outPath);
+            for (int i = 0; i < segs.Count; i++)
+                targets.Add((new List<Segment> { segs[i] }, UniquePath(Path.Combine(dir, $"{stem}_{i + 1:000}{ext}"))));
+        }
+        else targets.Add((segs, outPath));
+
+        if (targets.Any(t => segs.Any(s => string.Equals(Path.GetFullPath(s.Source.Path), Path.GetFullPath(t.path), StringComparison.OrdinalIgnoreCase))))
         {
             MessageBox.Show("元の動画と同じ名前には書き出せません。別の名前にしてください。", "Kirihari",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -597,20 +614,30 @@ public sealed class MainViewModel : ObservableObject
 
         try
         {
-            try
+            var done = new List<(ExportJob job, string path, int count)>();
+            for (int t = 0; t < targets.Count; t++)
             {
-                job = await RunOnce(segs, mode, enc, outPath);
+                var (part, path) = targets[t];
+                _splitLabel = targets.Count > 1 ? $"{t + 1}/{targets.Count} 本目　" : "";
+                try
+                {
+                    job = await RunOnce(part, mode, enc, path);
+                }
+                catch (InvalidOperationException ex) when (mode == ExportMode.Encode && enc.IsGpu)
+                {
+                    // GPU での書き出しに失敗したら、CPU でやり直す（以降の区間も CPU で）
+                    ExportText = "GPU で失敗したため、CPU でやり直しています…";
+                    ExportPercent = 0;
+                    Debug.WriteLine(ex.Message);
+                    enc = Encoders.Cpu;
+                    job = await RunOnce(part, mode, enc, path);
+                }
+                done.Add((job, path, part.Count));
             }
-            catch (InvalidOperationException ex) when (mode == ExportMode.Encode && enc.IsGpu)
-            {
-                // GPU での書き出しに失敗したら、CPU でやり直す
-                ExportText = "GPU で失敗したため、CPU でやり直しています…";
-                ExportPercent = 0;
-                Debug.WriteLine(ex.Message);
-                job = await RunOnce(segs, mode, Encoders.Cpu, outPath);
-            }
+            _splitLabel = "";
 
-            await ReportResult(job, outPath, segs.Count);
+            if (done.Count == 1) await ReportResult(done[0].job, done[0].path, done[0].count);
+            else await ReportSplitResult(done.Select(d => (d.job, d.path)).ToList());
         }
         catch (OperationCanceledException)
         {
@@ -645,9 +672,17 @@ public sealed class MainViewModel : ObservableObject
                 eta = "　残り約 " + (rest >= 60 ? $"{(int)(rest / 60)}分{(int)(rest % 60):00}秒" : $"{(int)Math.Ceiling(rest)}秒");
             }
             string speed = p.Speed > 0 ? $"　{p.Speed:0.#}倍速" : "";
-            ExportText = $"{p.Fraction * 100:0}%{speed}{eta}";
+            ExportText = $"{_splitLabel}{p.Fraction * 100:0}%{speed}{eta}";
         });
-        ExportText = mode == ExportMode.Copy ? "つないでいます…" : $"再エンコードしています（{enc.Label}）…";
+        string encLabel = Options.Format switch
+        {
+            OutputFormat.Mp4H265 => "CPU（x265）",
+            OutputFormat.Webm => "CPU（VP9）",
+            OutputFormat.Gif => "GIF",
+            OutputFormat.Mp3 or OutputFormat.Wav => "音声",
+            _ => enc.Label,
+        };
+        ExportText = _splitLabel + (mode == ExportMode.Copy ? "つないでいます…" : $"再エンコードしています（{encLabel}）…");
         await ExportRunner.RunAsync(job, progress, _exportCts.Token);
         return job;
     }
@@ -671,6 +706,44 @@ public sealed class MainViewModel : ObservableObject
         ExportPercent = 100;
         ExportText = "完了";
         Status = "書き出しが終わりました。";
+    }
+
+    private string _splitLabel = "";
+
+    /// <summary>区間ごとに書き出したときの結果。各ファイルの長さも確かめる。</summary>
+    private async Task ReportSplitResult(List<(ExportJob job, string path)> done)
+    {
+        long total = 0;
+        int suspicious = 0;
+        foreach (var (job, path) in done)
+        {
+            var fi = new FileInfo(path);
+            if (!fi.Exists || fi.Length == 0) throw new InvalidOperationException("出力ファイルが見つかりません: " + Path.GetFileName(path));
+            total += fi.Length;
+            double actual = await FFprobeService.ProbeDurationAsync(path);
+            double tolerance = job.Mode == ExportMode.Copy ? 3.0 : 1.0;
+            if (actual <= 0 || Math.Abs(actual - job.TotalSeconds) > tolerance) suspicious++;
+        }
+
+        string text = $"{done.Count} 本に分けて書き出しました：{Path.GetFileName(done[0].path)} 〜 {Path.GetFileName(done[^1].path)}\n合計サイズ {TimeFormat.Bytes(total)}";
+        if (suspicious > 0) text += $"\n※ {suspicious} 本は予定と長さが大きくちがいます。念のため、再生して確かめてください。";
+
+        _resultPath = done[0].path;
+        ResultText = text;
+        ExportPercent = 100;
+        ExportText = "完了";
+        Status = "書き出しが終わりました。";
+    }
+
+    private static string UniquePath(string path)
+    {
+        if (!File.Exists(path)) return path;
+        string dir = Path.GetDirectoryName(path), stem = Path.GetFileNameWithoutExtension(path), ext = Path.GetExtension(path);
+        for (int i = 2; ; i++)
+        {
+            string p = Path.Combine(dir, $"{stem} ({i}){ext}");
+            if (!File.Exists(p)) return p;
+        }
     }
 
     private bool CheckDiskSpace(string outPath, long need)

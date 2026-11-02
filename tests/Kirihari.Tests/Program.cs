@@ -295,6 +295,97 @@ else
         }
     }
 
+    // 7) 旧 SwiftCut から移した出力形式・速さ・音量（2026-11-02）
+    {
+        async Task<string> Streams(string file)
+        {
+            var (_, so, _) = await ProcessUtil.RunAsync(Tools.Ffprobe, new[] { "-v", "error", "-show_entries", "stream=codec_type,codec_name", "-of", "csv=p=0", file });
+            return string.Join(" ", System.Text.Encoding.UTF8.GetString(so).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim()));
+        }
+        async Task<(bool ok, string msg, string path)> Run(string name, ExportMode mode, ExportOptions o, params Segment[] segs)
+        {
+            string outp = Path.Combine(work, name);
+            try
+            {
+                var job = ExportPlanner.Build(segs, mode, Encoders.Cpu, outp, o);
+                await ExportRunner.RunAsync(job, null, default);
+                return (File.Exists(outp), "", outp);
+            }
+            catch (Exception ex) { return (false, ex.Message, outp); }
+        }
+
+        Check("形式: 既定は MP4・再エンコード不要（Lite の動作は変わらない）", new ExportOptions().Format == OutputFormat.Mp4H264 && !new ExportOptions().RequiresEncode);
+        Check("形式: MKV・MOV は再エンコードなしで可", !new ExportOptions { FormatIndex = 2 }.RequiresEncode && !new ExportOptions { FormatIndex = 3 }.RequiresEncode);
+        Check("形式: H.265・WebM・GIF・MP3・WAV は再エンコード", new[] { 1, 4, 5, 6, 7 }.All(i => new ExportOptions { FormatIndex = i }.RequiresEncode));
+        Check("形式: 速さ・音量を変えると再エンコード、音声なしはそのままで可",
+            new ExportOptions { SpeedIndex = 5 }.RequiresEncode && new ExportOptions { VolumeIndex = 3 }.RequiresEncode && !new ExportOptions { VolumeIndex = 5 }.RequiresEncode);
+        string af4 = ExportPlanner.AudioPostFilter(new ExportOptions { SpeedIndex = 6 });
+        Check("速さ: 4倍は atempo を2段に分ける", af4.Split(',').Length == 2 && af4.Split(',').All(x => x.StartsWith("atempo=2")), af4);
+
+        var two = new[] { new Segment(mA1, 2, 6), new Segment(mA2, 0, 4) };
+
+        var r = await Run("copy.mkv", ExportMode.Copy, new ExportOptions { FormatIndex = 2 }, two);
+        Check("MKV（再エンコードなし）: 書き出せた", r.ok, r.msg);
+        if (r.ok) Check("MKV: 映像 h264 のまま・matroska", (await Streams(r.path)).Contains("h264,video") && (await FFprobeService.ProbeAsync(r.path)).Summary != null, await Streams(r.path));
+
+        r = await Run("mute-copy.mp4", ExportMode.Copy, new ExportOptions { VolumeIndex = 5 }, two);
+        Check("音声なし（再エンコードなし）: 音声トラックが無い", r.ok && !(await Streams(r.path)).Contains("audio"), r.ok ? await Streams(r.path) : r.msg);
+
+        r = await Run("h265.mp4", ExportMode.Encode, new ExportOptions { FormatIndex = 1, PresetIndex = 0 }, two);
+        Check("H.265: 書き出せた・hevc + aac", r.ok && (await Streams(r.path)).Contains("hevc,video") && (await Streams(r.path)).Contains("aac,audio"), r.ok ? await Streams(r.path) : r.msg);
+
+        r = await Run("vp9.webm", ExportMode.Encode, new ExportOptions { FormatIndex = 4, HeightIndex = 5 }, two);
+        Check("WebM: 書き出せた・vp9 + opus", r.ok && (await Streams(r.path)).Contains("vp9,video") && (await Streams(r.path)).Contains("opus,audio"), r.ok ? await Streams(r.path) : r.msg);
+
+        r = await Run("anim.gif", ExportMode.Encode, new ExportOptions { FormatIndex = 5 }, new Segment(mA1, 0, 3));
+        if (r.ok)
+        {
+            var mg = await FFprobeService.ProbeAsync(r.path);
+            Check("GIF: 書き出せた・480p に縮小・15fps・音声なし", mg.VideoCodec == "gif" && mg.Height == 480 && mg.Fps >= 14 && mg.Fps <= 17 /* GIF のコマ間隔は 1/100 秒単位なので 15fps は 16.67 と読める */ && !mg.HasAudio, mg.Summary);
+        }
+        else Check("GIF: 書き出せた", false, r.msg);
+
+        r = await Run("audio.mp3", ExportMode.Encode, new ExportOptions { FormatIndex = 6 }, two);
+        if (r.ok)
+        {
+            string st = await Streams(r.path);
+            double d = await FFprobeService.ProbeDurationAsync(r.path);
+            Check("MP3: 音声だけ・長さ 8秒", st == "mp3,audio" && Math.Abs(d - 8) < 0.3, $"{st} {d:0.00}s");
+        }
+        else Check("MP3: 書き出せた", false, r.msg);
+
+        r = await Run("audio.wav", ExportMode.Encode, new ExportOptions { FormatIndex = 7 }, new Segment(mA1, 0, 4));
+        Check("WAV: pcm_s16le", r.ok && (await Streams(r.path)) == "pcm_s16le,audio", r.ok ? await Streams(r.path) : r.msg);
+
+        r = await Run("noaudio.mp3", ExportMode.Encode, new ExportOptions { FormatIndex = 6 }, new Segment(mN, 0, 3));
+        Check("MP3: 音声のない動画は分かる言葉で断る", !r.ok && r.msg.Contains("音声の入っていない"), r.msg);
+
+        r = await Run("speed2x.mp4", ExportMode.Encode, new ExportOptions { SpeedIndex = 5 }, two);
+        if (r.ok)
+        {
+            double d = await FFprobeService.ProbeDurationAsync(r.path);
+            Check("速さ2倍: 8秒の素材が4秒に", Math.Abs(d - 4) < 0.3, $"{d:0.00}s");
+        }
+        else Check("速さ2倍: 書き出せた", false, r.msg);
+
+        r = await Run("half.mp4", ExportMode.Encode, new ExportOptions { SpeedIndex = 1, VolumeIndex = 1 }, new Segment(mA1, 0, 3));
+        if (r.ok)
+        {
+            double d = await FFprobeService.ProbeDurationAsync(r.path);
+            Check("速さ0.5倍＋音量50%: 3秒が6秒に", Math.Abs(d - 6) < 0.3, $"{d:0.00}s");
+        }
+        else Check("速さ0.5倍＋音量50%: 書き出せた", false, r.msg);
+
+        r = await Run("gif-fast.gif", ExportMode.Encode, new ExportOptions { FormatIndex = 5, SpeedIndex = 5 }, new Segment(mA1, 0, 4));
+        if (r.ok)
+        {
+            var mg = await FFprobeService.ProbeAsync(r.path);
+            double d = await FFprobeService.ProbeDurationAsync(r.path);
+            Check("GIF＋速さ2倍: 2秒・15fps のまま", Math.Abs(d - 2) < 0.3 && mg.Fps >= 14 && mg.Fps <= 17 /* GIF のコマ間隔は 1/100 秒単位なので 15fps は 16.67 と読める */, $"{d:0.00}s {mg.Summary}");
+        }
+        else Check("GIF＋速さ2倍: 書き出せた", false, r.msg);
+    }
+
     // 6) GPU
     var gpu = await Encoders.DetectGpuAsync();
     Console.WriteLine("INFO  GPU エンコーダー: " + (gpu?.Label ?? "なし"));
